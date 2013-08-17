@@ -1,0 +1,31 @@
+{
+  "name": "manikin-mem",
+  "description": "Data model abstractions in-memory",
+  "version": "0.1.0",
+  "main": "./lib/manikin-mem.js",
+  "author": "Jakob Mattsson <jakob.mattsson@gmail.com> (jakobmattsson.se)",
+  "engines": {
+    "npm": "1.1.x",
+    "node": "0.8.x"
+  },
+  "scripts": {
+    "pretest": "coffee -co lib src",
+    "prepublish": "coffee -co lib src",
+    "test": "mocha --compilers coffee:coffee-script --recursive --bail spec",
+    "coverage": "jscov src .cov && JSCOV=.cov mocha --compilers coffee:coffee-script --reporter mocha-term-cov-reporter spec/*.coffee",
+    "prestart": "coffee -co lib src"
+  },
+  "dependencies": {
+    "manikin-tools": ">= 0.1.1 < 0.2",
+    "underscore": ">= 1.4.0 < 2",
+    "async": ">= 0.1.0 < 3"
+  },
+  "devDependencies": {
+    "manikin": ">= 0.1.0 < 0.2",
+    "jscov": ">= 0.5.1 < 0.6",
+    "mocha-term-cov-reporter": ">= 0.1.3 < 0.2",
+    "mocha": ">= 1.7.4 < 2",
+    "coffee-script": ">= 1.4.0 < 2",
+    "should": ">= 1.2.1 < 2"
+  }
+}
