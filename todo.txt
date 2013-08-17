@@ -1,0 +1,2 @@
+# test om man stoppar in data som inte förväntas.
+# test om man stoppar in data på fel primitiv typ.

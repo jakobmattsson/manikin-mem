@@ -11,7 +11,7 @@
   "scripts": {
     "pretest": "coffee -co lib src",
     "prepublish": "coffee -co lib src",
-    "test": "mocha --compilers coffee:coffee-script --recursive --bail spec",
+    "test": "mocha --compilers coffee:coffee-script --recursive --bail --timeout 100 spec",
     "coverage": "jscov src .cov && JSCOV=.cov mocha --compilers coffee:coffee-script --reporter mocha-term-cov-reporter spec/*.coffee",
     "prestart": "coffee -co lib src"
   },

@@ -1,8 +1,21 @@
-later = (f) ->
+async = require 'async'
+_ = require 'underscore'
+tools = require 'manikin-tools'
+
+later = (f, args...) ->
   if setImmediate?
-    setImmediate(f)
+    setImmediate(f.bind(null, args...))
   else
-    setTimeout(f, 0)
+    setTimeout(f.bind(null, args...), 0)
+
+toDateTimeFormat = (x) ->
+  "2012-10-15T00:00:00.000Z"   ## denna måste beräknas på riktigt
+
+filterList = (data, filter) ->
+  keys = Object.keys(filter)
+  data.filter (x) ->
+    keys.every (k) -> x[k] == filter[k]
+
 
 exports.create = ->
 
@@ -11,6 +24,35 @@ exports.create = ->
   lateLoadModel = null
   dbObj = null
   dbModel = null
+
+  createId = do ->
+    counter = 0
+    -> "uid#{++counter}"
+
+  initDb = ->
+    if dbModel? && dbObj?
+      Object.keys(dbModel).forEach (key) ->
+        dbObj[key] = []
+
+  mustHaveModel = (f) ->
+    ->
+      throw new Error("No model defined") if !dbModel?
+      f.apply(this, arguments)
+
+  preprocessInput = (model, data) ->
+    fields = dbModel[model].fields
+
+    out = {}
+
+    _.pairs(fields).forEach ([name, info]) ->
+      if info.type == 'date'
+        out[name] = toDateTimeFormat(data[name])
+      else
+        out[name] = data[name]
+
+    out
+
+
 
   api.connect = (connData, inputModels, callback) ->
     if !callback? && typeof inputModels == 'function'
@@ -25,33 +67,43 @@ exports.create = ->
     if inputModels
       api.load(inputModels, callback)
     else
+      initDb()
       later(callback)
-
 
   api.close = (callback) ->
     later(callback)
 
   api.load = (models, callback) ->
-    dbModel = models
+    dbModel = tools.desugar(models)
+    initDb()
     later(callback)
 
   api.connectionData = -> dbObj
 
-  api.post = (model, indata, callback) ->
-    later(callback)
+  api.post = mustHaveModel (model, indata, callback) ->
+    input = _.extend({}, preprocessInput(model, indata), { id: createId() })
+    dbObj[model].push(input)
+    later(callback, null, input)
 
-  api.list = ->
-  
-  api.getOne = ->
+  api.list = mustHaveModel (model, filter, callback) ->
+    result = filterList(dbObj[model], filter)
+    later(callback, null, result)
 
-  api.delOne = ->
+  api.getOne = mustHaveModel (model, config, callback) ->
+    filter = config.filter ? {}
+    api.list model, filter, (err, data) ->
+      return callback(err) if err?
+      return callback(new Error("Could not find anything")) if data.length == 0
+      callback(null, data[0])
 
-  api.putOne = ->
+  api.delOne = mustHaveModel ->
 
-  api.getMany = ->
+  api.putOne = mustHaveModel ->
 
-  api.delMany = ->
+  api.getMany = mustHaveModel ->
 
-  api.postMany = ->
+  api.delMany = mustHaveModel ->
+
+  api.postMany = mustHaveModel ->
 
   api
