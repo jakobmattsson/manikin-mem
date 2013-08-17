@@ -1,29 +1,44 @@
+later = (f) ->
+  if setImmediate?
+    setImmediate(f)
+  else
+    setTimeout(f, 0)
+
 exports.create = ->
 
   api = {}
 
   lateLoadModel = null
+  dbObj = null
+  dbModel = null
 
-  api.connect = (databaseUrl, inputModels, callback) ->
+  api.connect = (connData, inputModels, callback) ->
     if !callback? && typeof inputModels == 'function'
       callback = inputModels
       inputModels = lateLoadModel
 
+    if typeof connData != 'object'
+      return callback(new Error("Invalid connection data. Please use an empty object."))
+
+    dbObj = connData
+
     if inputModels
       api.load(inputModels, callback)
     else
-      callback()
+      later(callback)
 
 
   api.close = (callback) ->
-    callback()
+    later(callback)
 
   api.load = (models, callback) ->
-    callback()
+    dbModel = models
+    later(callback)
 
-  api.connectionData = ->
+  api.connectionData = -> dbObj
 
-  api.post = ->
+  api.post = (model, indata, callback) ->
+    later(callback)
 
   api.list = ->
   
