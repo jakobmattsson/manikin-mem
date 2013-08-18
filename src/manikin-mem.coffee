@@ -25,31 +25,43 @@ filterList = (data, filter = {}) ->
 
 deepCopy = (x) -> JSON.parse(JSON.stringify(x))
 
+defaultValidator = (api, value, callback) -> callback(true)
+
 propagate = (onErr, onSucc) -> (err, rest...) -> if err? then onErr(err) else onSucc(rest...)
 
-
-owns = (dbModel, ownerModel, includeIndirect) -> #includeIndirect är inte implementerad. men behövs den?
+owns = (dbModel, ownerModel) ->
   _.flatten _.pairs(dbModel).map ([model, {owners, indirectOwners}]) ->
     _.pairs(owners).filter(([singular, plural]) -> plural == ownerModel).map ([singular, plural]) ->
       { model: model, field: singular }
+
+formatField = (info, data) ->
+  if info.type == 'date'
+    toDateTimeFormat(data)
+  else
+    data
+
+createId = do ->
+  counter = 0
+  -> "uid#{++counter}"
+
 
 
 exports.create = ->
 
   api = {}
-
-  lateLoadModel = null
   dbObj = null
   dbModel = null
 
-  createId = do ->
-    counter = 0
-    -> "uid#{++counter}"
+  getStore = (name) ->
+    if name
+      dbObj.collections[name]
+    else
+      dbObj.collections
 
   initDb = ->
     if dbModel? && dbObj?
       Object.keys(dbModel).forEach (key) ->
-        dbObj[key] = []
+        getStore()[key] = []
 
   mustHaveModel = (f) ->
     (model, args..., callback) ->
@@ -58,122 +70,111 @@ exports.create = ->
       f.apply(this, arguments)
 
   preprocessInput = (model, data, includeDefaults, callback) ->
-    fields = dbModel[model].fields
+    inputKeys = Object.keys(data) # Detta hanterar inte nestade properties
+    validKeys = Object.keys(dbModel[model].fields).concat(Object.keys(dbModel[model].owners))
+    invalidKeys = _.difference(inputKeys, validKeys)
+    return callback(new Error("Invalid fields: #{invalidKeys.join(', ')}")) if invalidKeys.length > 0
 
     out = {}
-
-    async.forEach _.pairs(fields), ([name, info], callback) ->
+    async.forEach _.pairs(dbModel[model].fields), ([name, info], callback) ->
       return callback() if !includeDefaults && name not of data
-
-      if info.type == 'date'
-        out[name] = toDateTimeFormat(data[name])
-      else
-        out[name] = data[name]
-
-      if info.validate
-        info.validate api, out[name], (isOk) ->
-          if !isOk
-            er = new Error("Validation failed")
-            er.errors = { name: path: name }
-            callback(er)
-          else
-            callback()
-      else
-        callback()
+      out[name] = formatField(info, data[name])
+      validation = info.validate || defaultValidator
+      validation api, out[name], (isOk) ->
+        return callback() if isOk 
+        er = new Error("Validation failed")
+        er.errors = { name: path: name }
+        callback(er)
     , (err) ->
       callback(err, out)
 
   deleteObj = (model, obj) ->
-    index = dbObj[model].indexOf(obj)
+    index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
-    dbObj[model].splice(index, 1)
+    getStore(model).splice(index, 1)
     owns(dbModel, model).forEach ({ model, field }) ->
       delAll(model, _.object([[field, obj.id]]))
 
   delAll = (model, filter) ->
-    result = filterList(dbObj[model], filter)
+    result = filterList(getStore(model), filter)
     result.forEach (r) ->
       deleteObj(model, r)
 
-  api.connect = (connData, inputModels, callback) ->
-    if !callback? && typeof inputModels == 'function'
-      callback = inputModels
-      inputModels = lateLoadModel
+  filterOne = (model, filter, callback) ->
+    result = filterList(getStore(model), filter)
+    return callback(new Error("No such id")) if result.length == 0
+    callback(null, result[0])
 
-    if typeof connData != 'object'
-      return callback(new Error("Invalid connection data. Please use an empty object."))
+  setOwnerData = (model, indata) ->
+    input = {}
+    _.pairs(dbModel[model].owners).forEach ([singular, plural]) ->
+      matches = filterList(getStore(plural), { id: indata[singular] })
+      match = matches[0]
+      if matches.length == 1
+        input[singular] = indata[singular]
+        Object.keys(dbModel[model].indirectOwners).forEach (key) ->
+          input[key] = match[key]
+    input
 
-    dbObj = connData
 
-    if inputModels
-      api.load(inputModels, callback)
-    else
+
+  api =
+    connect: (connData, rest..., callback) ->
+      [inputModels] = rest
+      return callback(new Error("Invalid connection data. Please use an empty object.")) if typeof connData != 'object'
+      dbObj = connData
+      dbObj.collections ?= {}
+      if inputModels
+        api.load(inputModels, callback)
+      else
+        initDb()
+        later(callback)
+
+    close: (callback) ->
+      later(callback)
+
+    load: (models, callback) ->
+      dbModel = tools.desugar(models)
       initDb()
       later(callback)
 
-  api.close = (callback) ->
-    later(callback)
+    connectionData: ->
+      dbObj
 
-  api.load = (models, callback) ->
-    dbModel = tools.desugar(models)
-    initDb()
-    later(callback)
+    post: mustHaveModel (model, indata, callback) ->
+      preprocessInput model, indata, true, propagate callback, (processedInput) ->
+        input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
+        return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
+        getStore(model).push(input)
+        later(callback, null, input)
 
-  api.connectionData = -> dbObj
+    list: mustHaveModel (model, filter, callback) ->
+      result = filterList(getStore(model), filter)
+      defaultSort = dbModel[model].defaultSort
+      result = _(result).sortBy(defaultSort) if defaultSort
+      later(callback, null, result)
 
-  api.post = mustHaveModel (model, indata, callback) ->
-    preprocessInput model, indata, true, propagate callback, (dd) ->
-      input = _.extend({}, dd, { id: createId() })
+    getOne: mustHaveModel (model, config, callback) ->
+      filter = config.filter ? {}
+      api.list model, filter, propagate callback, (data) ->
+        return callback(new Error('No such id')) if data.length == 0 && Object.keys(filter).length == 1 && 'id' of filter
+        return callback(new Error('No match')) if data.length == 0
+        callback(null, data[0])
 
-      _.pairs(dbModel[model].owners).forEach ([singular, plural]) ->
-        matches = filterList(dbObj[plural], { id: indata[singular] })
-        match = matches[0]
-        if matches.length == 1
-          input[singular] = indata[singular]
-          Object.keys(dbModel[model].indirectOwners).forEach (key) ->
-            input[key] = match[key]
+    putOne: mustHaveModel (model, data, filter, callback) ->
+      filterOne model, filter, propagate callback, (result) ->
+        preprocessInput model, data, false, propagate callback, (d2) ->
+          _.extend(result, d2)
+          later(callback, null, result)
 
-      if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
-        return callback(new Error("Must give owner k thx plz ._0"))
-
-      dbObj[model].push(input)
-      later(callback, null, input)
-
-  api.list = mustHaveModel (model, filter, callback) ->
-    result = filterList(dbObj[model], filter)
-    defaultSort = dbModel[model].defaultSort
-    result = _(result).sortBy(defaultSort) if defaultSort
-    later(callback, null, result)
-
-  api.getOne = mustHaveModel (model, config, callback) ->
-    filter = config.filter ? {}
-    api.list model, filter, (err, data) ->
-      return callback(err) if err?
-      return callback(new Error("No such id")) if data.length == 0 && Object.keys(filter).length == 1 && "id" of filter
-      return callback(new Error("No match")) if data.length == 0
-      callback(null, data[0])
-
-  api.putOne = mustHaveModel (model, data, filter, callback) ->
-    result = filterList(dbObj[model], filter)
-    return callback(new Error("No such id")) if result.length == 0
-    preprocessInput model, data, false, propagate callback, (d2) ->
-      _.extend(result[0], d2) # här måste man se till att inga ogiltiga objekt stoppas in
-      later(callback, null, result[0])
-
-  api.delOne = mustHaveModel (model, filter, callback) ->
-    result = filterList(dbObj[model], filter)
-    return callback(new Error("No such id")) if result.length == 0
-    deleteObj(model, result[0])
-    later(callback, null, result[0])
+    delOne: mustHaveModel (model, filter, callback) ->
+      filterOne model, filter, propagate callback, (result) ->
+        deleteObj(model, result)
+        later(callback, null, result)
 
 
+    getMany: mustHaveModel ->
 
+    delMany: mustHaveModel ->
 
-
-  api.getMany = mustHaveModel ->
-
-  api.delMany = mustHaveModel ->
-
-  api.postMany = mustHaveModel ->
-
-  api
+    postMany: mustHaveModel ->
