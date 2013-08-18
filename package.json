@@ -5,14 +5,14 @@
   "main": "./lib/manikin-mem.js",
   "author": "Jakob Mattsson <jakob.mattsson@gmail.com> (jakobmattsson.se)",
   "engines": {
-    "npm": "1.1.x",
-    "node": "0.8.x"
+    "npm": ">= 1.1 < 2",
+    "node": ">= 0.8 < 0.12"
   },
   "scripts": {
     "pretest": "coffee -co lib src",
     "prepublish": "coffee -co lib src",
     "test": "mocha --compilers coffee:coffee-script --recursive --bail --timeout 100 spec",
-    "coverage": "jscov src .cov && JSCOV=.cov mocha --compilers coffee:coffee-script --reporter mocha-term-cov-reporter spec/*.coffee",
+    "coverage": "jscov src .cov && JSCOV=.cov mocha --compilers coffee:coffee-script --recursive --bail --timeout 100 spec",
     "prestart": "coffee -co lib src"
   },
   "dependencies": {
