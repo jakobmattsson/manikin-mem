@@ -1,2 +1,6 @@
 # test om man stoppar in data som inte förväntas.
 # test om man stoppar in data på fel primitiv typ.
+
+
+# testa så att post/list/get/put returnerar kopior; inte originalobjekten
+  # testa att breaka detta (en implementation som gör en klon av inobjektet borde passera testerna)

@@ -8,14 +8,21 @@ later = (f, args...) ->
   else
     setTimeout(f.bind(null, args...), 0)
 
+## denna måste beräknas på riktigt
+timeCounter = 0
 toDateTimeFormat = (x) ->
-  "2012-10-15T00:00:00.000Z"   ## denna måste beräknas på riktigt
+  ++timeCounter
+  if timeCounter < 3
+    "2012-10-15T00:00:00.000Z"
+  else
+    "2012-10-15T13:37:00.000Z"
 
-filterList = (data, filter) ->
+filterList = (data, filter = {}) ->
   keys = Object.keys(filter)
   data.filter (x) ->
     keys.every (k) -> x[k] == filter[k]
 
+deepCopy = (x) -> JSON.parse(JSON.stringify(x))
 
 exports.create = ->
 
@@ -39,12 +46,13 @@ exports.create = ->
       throw new Error("No model defined") if !dbModel?
       f.apply(this, arguments)
 
-  preprocessInput = (model, data) ->
+  preprocessInput = (model, data, includeDefaults) ->
     fields = dbModel[model].fields
 
     out = {}
 
     _.pairs(fields).forEach ([name, info]) ->
+      return if !includeDefaults && name not of data
       if info.type == 'date'
         out[name] = toDateTimeFormat(data[name])
       else
@@ -81,7 +89,7 @@ exports.create = ->
   api.connectionData = -> dbObj
 
   api.post = mustHaveModel (model, indata, callback) ->
-    input = _.extend({}, preprocessInput(model, indata), { id: createId() })
+    input = _.extend({}, preprocessInput(model, indata, true), { id: createId() })
     dbObj[model].push(input)
     later(callback, null, input)
 
@@ -93,12 +101,25 @@ exports.create = ->
     filter = config.filter ? {}
     api.list model, filter, (err, data) ->
       return callback(err) if err?
-      return callback(new Error("Could not find anything")) if data.length == 0
+      return callback(new Error("No such id")) if data.length == 0
       callback(null, data[0])
 
-  api.delOne = mustHaveModel ->
+  api.putOne = mustHaveModel (model, data, filter, callback) ->
+    result = filterList(dbObj[model], filter)
+    return callback(new Error("No such id")) if result.length == 0
+    _.extend(result[0], preprocessInput(model, data, false)) # här måste man se till att inga ogiltiga objekt stoppas in
+    later(callback, null, result[0])
 
-  api.putOne = mustHaveModel ->
+  api.delOne = mustHaveModel (model, filter, callback) ->
+    result = filterList(dbObj[model], filter)
+    return callback(new Error("No such id")) if result.length == 0
+    index = dbObj[model].indexOf(result[0])
+    throw new Error("Impossibe") if index == -1
+    dbObj[model].splice(index, 1)
+    later(callback, null, result[0])
+    
+    
+    
 
   api.getMany = mustHaveModel ->
 
