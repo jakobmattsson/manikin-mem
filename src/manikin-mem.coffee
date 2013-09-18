@@ -88,9 +88,15 @@ exports.create = ->
     , (err) ->
       callback(err, out)
 
+  deleteObjFromManyToManyRelations = (model, obj) ->
+    dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
+      getStore(ref).forEach (x) ->
+        x[inverseName] = x[inverseName].filter (s) -> s != obj.id
+
   deleteObj = (model, obj) ->
     index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
+    deleteObjFromManyToManyRelations(model, obj)
     getStore(model).splice(index, 1)
     owns(dbModel, model).forEach ({ model, field }) ->
       delAll(model, _.object([[field, obj.id]]))
@@ -181,9 +187,6 @@ exports.create = ->
       self = @
       filterOne model, filter, propagate callback, (result) ->
         later ->
-          dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
-            getStore(ref).forEach (x) ->
-              x[inverseName] = x[inverseName].filter (s) -> s != result.id
           deleteObj(model, result)
           callback(null, result)
 
