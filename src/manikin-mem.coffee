@@ -2,11 +2,10 @@ async = require 'async'
 _ = require 'underscore'
 tools = require 'manikin-tools'
 
-later = (f, args...) ->
-  if setImmediate?
-    setImmediate(f.bind(null, args...))
-  else
-    setTimeout(f.bind(null, args...), 0)
+if typeof setImmediate == 'undefined'
+  setImmediate = (f) -> setTimeout(f, 0)
+
+later = (f, args...) -> setImmediate(f.bind(null, args...))
 
 ## denna måste beräknas på riktigt. utan timeCounter
 toDateTimeFormat = do ->
@@ -184,3 +183,7 @@ exports.create = ->
       modelData[relation] = modelData[relation] || []
       modelData[relation].push(id2) # vad händer om denna redan finns i data settet?
       later(callback)
+
+
+
+# Testa att alla operationerna anropar sin callback EFTER att de returnerat
