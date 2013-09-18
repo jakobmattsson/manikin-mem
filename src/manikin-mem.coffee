@@ -172,9 +172,15 @@ exports.create = ->
         deleteObj(model, result)
         later(callback, null, result)
 
-
-    getMany: mustHaveModel ->
+    getMany: mustHaveModel (model, id, relation, callback) ->
+      modelData = filterList(getStore(model), { id })[0] # vad händer om denna har en längd på noll?
+      later ->
+        callback(null, modelData[relation])
 
     delMany: mustHaveModel ->
 
-    postMany: mustHaveModel ->
+    postMany: mustHaveModel (model, id1, relation, id2, callback) ->
+      modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
+      modelData[relation] = modelData[relation] || []
+      modelData[relation].push(id2) # vad händer om denna redan finns i data settet?
+      later(callback)
