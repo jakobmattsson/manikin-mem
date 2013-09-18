@@ -50,6 +50,7 @@ exports.create = ->
   api = {}
   dbObj = null
   dbModel = null
+  dbMetaModel = null
 
   getStore = (name) ->
     if name
@@ -134,6 +135,7 @@ exports.create = ->
 
     load: (models, callback) ->
       dbModel = tools.desugar(models)
+      dbMetaModel = tools.getMeta(dbModel)
       initDb()
       later(callback)
 
@@ -144,8 +146,9 @@ exports.create = ->
       preprocessInput model, indata, true, propagate callback, (processedInput) ->
         input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
         return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
-        getStore(model).push(input)
-        later(callback, null, input)
+        later ->
+          getStore(model).push(input)
+          callback(null, input)
 
     list: mustHaveModel (model, filter, callback) ->
       result = filterList(getStore(model), filter)
@@ -163,26 +166,56 @@ exports.create = ->
     putOne: mustHaveModel (model, data, filter, callback) ->
       filterOne model, filter, propagate callback, (result) ->
         preprocessInput model, data, false, propagate callback, (d2) ->
-          _.extend(result, d2)
-          later(callback, null, result)
+          later ->
+            _.extend(result, d2)
+            callback(null, result)
 
     delOne: mustHaveModel (model, filter, callback) ->
       filterOne model, filter, propagate callback, (result) ->
-        deleteObj(model, result)
-        later(callback, null, result)
+        later ->
+          deleteObj(model, result)
+          callback(null, result)
 
-    getMany: mustHaveModel (model, id, relation, callback) ->
+
+
+    getMany: mustHaveModel (model, id, relation, filterData, callback) ->
+      if !callback
+        callback = filterData
+        filterData = {}
+
+      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
       modelData = filterList(getStore(model), { id })[0] # vad händer om denna har en längd på noll?
       later ->
+        result = getStore(metadata.ref) # läser in hela datasettet. lite crazy.
+        res = result.filter (x) -> x.id in modelData[relation]
+        callback(null, res)
+
+
+
+    delMany: mustHaveModel (model, id1, relation, id2, callback) ->
+      modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
+      later ->
+        modelData[relation] = modelData[relation].filter (x) -> x != id2
         callback(null, modelData[relation])
 
-    delMany: mustHaveModel ->
+
 
     postMany: mustHaveModel (model, id1, relation, id2, callback) ->
-      modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
-      modelData[relation] = modelData[relation] || []
-      modelData[relation].push(id2) # vad händer om denna redan finns i data settet?
-      later(callback)
+      relationInfo = dbModel[model].fields[relation] # vad gör man om relationInfo inte finns?
+
+      inverseModel = relationInfo.model
+      inverseField = relationInfo.inverseName
+
+      model1 = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
+      model2 = filterList(getStore(inverseModel), { id: id2 })[0] # vad händer om denna har en längd på noll?
+
+      model1[relation] = model1[relation] || []
+      model2[inverseField] = model2[inverseField] || []
+
+      later ->
+        model1[relation].push(id2) # vad händer om denna redan finns i data settet?
+        model2[inverseField].push(id1) # vad händer om denna redan finns i data settet?
+        callback()
 
 
 
