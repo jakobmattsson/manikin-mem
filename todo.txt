@@ -9,3 +9,5 @@
 # testa att entt indirekt ägt objekt också tas bort när ancestorn tas bort
 # Testa att man givet en manikins connection data kan connecta till en annan och få ut samma resultat från den.
 # speca också upp vad det betyder att closa en. ska man inte kunna göra fler operationer då?
+
+# Testa att alla operationerna anropar sin callback EFTER att de returnerat

@@ -117,6 +117,11 @@ exports.create = ->
     input
 
 
+  ensureManyToManyIsArrays = (model, input) ->
+    dbMetaModel[model].manyToMany.map ({name}) ->
+      if !Array.isArray(input[name])
+        input[name] = []
+
 
   api =
     connect: (connData, rest..., callback) ->
@@ -146,6 +151,7 @@ exports.create = ->
       preprocessInput model, indata, true, propagate callback, (processedInput) ->
         input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
         return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
+        ensureManyToManyIsArrays(model, input)
         later ->
           getStore(model).push(input)
           callback(null, input)
@@ -168,11 +174,16 @@ exports.create = ->
         preprocessInput model, data, false, propagate callback, (d2) ->
           later ->
             _.extend(result, d2)
+            ensureManyToManyIsArrays(model, result)
             callback(null, result)
 
     delOne: mustHaveModel (model, filter, callback) ->
+      self = @
       filterOne model, filter, propagate callback, (result) ->
         later ->
+          dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
+            getStore(ref).forEach (x) ->
+              x[inverseName] = x[inverseName].filter (s) -> s != result.id
           deleteObj(model, result)
           callback(null, result)
 
@@ -185,18 +196,24 @@ exports.create = ->
 
       metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
       modelData = filterList(getStore(model), { id })[0] # vad händer om denna har en längd på noll?
+
       later ->
         result = getStore(metadata.ref) # läser in hela datasettet. lite crazy.
-        res = result.filter (x) -> x.id in modelData[relation]
+        res = result.filter (x) -> x.id in (modelData[relation] || [])
+        res = filterList(res, filterData)
         callback(null, res)
 
 
 
     delMany: mustHaveModel (model, id1, relation, id2, callback) ->
+      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
       modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
+      modelData2 = filterList(getStore(metadata.ref), { id: id2 })[0] # vad händer om denna har en längd på noll?
+
       later ->
         modelData[relation] = modelData[relation].filter (x) -> x != id2
-        callback(null, modelData[relation])
+        modelData2[metadata.inverseName] = modelData2[metadata.inverseName].filter (x) -> x != id1
+        callback(null, modelData[relation]) # varför returnera något här?
 
 
 
@@ -209,9 +226,6 @@ exports.create = ->
       model1 = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
       model2 = filterList(getStore(inverseModel), { id: id2 })[0] # vad händer om denna har en längd på noll?
 
-      model1[relation] = model1[relation] || []
-      model2[inverseField] = model2[inverseField] || []
-
       later ->
         model1[relation].push(id2) # vad händer om denna redan finns i data settet?
         model2[inverseField].push(id1) # vad händer om denna redan finns i data settet?
@@ -219,4 +233,3 @@ exports.create = ->
 
 
 
-# Testa att alla operationerna anropar sin callback EFTER att de returnerat
