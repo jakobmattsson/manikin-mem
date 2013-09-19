@@ -128,117 +128,34 @@ exports.create = ->
       if !Array.isArray(input[name])
         input[name] = []
 
-
-  insertOps = []
-
-
-
-
-  api =
-    connect: (connData, rest..., callback) ->
-      [inputModels] = rest
-      return callback(new Error("Invalid connection data. Please use an empty object.")) if typeof connData != 'object'
-      dbObj = connData
-      dbObj.collections ?= {}
-      if inputModels
-        api.load(inputModels, callback)
-      else
-        initDb()
-        setImmediate(callback)
-
-    close: (callback) ->
-      setImmediate(callback)
-
-    load: (models, callback) ->
-      dbModel = tools.desugar(models)
-      dbMetaModel = tools.getMeta(dbModel)
-      initDb()
-      setImmediate(callback)
-
-    connectionData: ->
-      dbObj
-
-    post: mustHaveModel (model, indata, callback) ->
-      preprocessInput model, indata, true, propagate callback, (processedInput) ->
-        input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
-        return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
-        ensureManyToManyIsArrays(model, input)
-        setImmediate ->
-          getStore(model).push(input)
-          callback(null, input)
-
-    list: mustHaveModel (model, filter, callback) ->
-      result = filterList(getStore(model), filter)
-      defaultSort = dbModel[model].defaultSort
-      result = _(result).sortBy(defaultSort) if defaultSort
-      later(callback, null, result)
-
-    getOne: mustHaveModel (model, config, callback) ->
-      filter = config.filter ? {}
-      api.list model, filter, propagate callback, (data) ->
-        return callback(new Error('No such id')) if data.length == 0 && Object.keys(filter).length == 1 && 'id' of filter
-        return callback(new Error('No match')) if data.length == 0
-        callback(null, data[0])
-
-    putOne: mustHaveModel (model, data, filter, callback) ->
-      filterOne model, filter, propagate callback, (result) ->
-        preprocessInput model, data, false, propagate callback, (d2) ->
-          setImmediate ->
-            _.extend(result, d2)
-            ensureManyToManyIsArrays(model, result)
-            callback(null, result)
-
-    delOne: mustHaveModel (model, filter, callback) ->
-      self = @
-      filterOne model, filter, propagate callback, (result) ->
-        setImmediate ->
-          deleteObj(model, result)
-          callback(null, result)
+  delayCallback = (f) ->
+    (args...) -> setImmediate => f(args...)
 
 
 
-    getMany: mustHaveModel (model, id, relation, filterData, callback) ->
-      if !callback
-        callback = filterData
-        filterData = {}
+  getManyToManyMeta = (model, relation, callback) ->
+    metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
+    if !metadata?
+      callback(new Error('Invalid many-to-many property'))
+    else
+      callback(null, metadata)
 
-      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
-      modelData = filterList(getStore(model), { id })[0] # vad händer om denna har en längd på noll?
+  getModelDataById = (model, id, callback) ->
+    modelData = filterList(getStore(model), { id })[0]
+    if !modelData?
+      callback(new Error("Could not find an instance of '#{model}' with id '#{id}'"))
+    else
+      callback(null, modelData)
 
-      setImmediate ->
-        result = getStore(metadata.ref)
-        res = result.filter (x) -> x.id in (modelData[relation] || [])
-        res = filterList(res, filterData)
-        callback(null, res)
-
-
-
-    delMany: mustHaveModel (model, id1, relation, id2, callback) ->
-      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
-
-      if !metadata?
-        later(callback, new Error('Invalid many-to-many property'))
-        return
-
-      modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
-      modelData2 = filterList(getStore(metadata.ref), { id: id2 })[0] # vad händer om denna har en längd på noll?
-
-      setImmediate ->
-        modelData[relation] = modelData[relation].filter (x) -> x != id2
-        modelData2[metadata.inverseName] = modelData2[metadata.inverseName].filter (x) -> x != id1
-        callback(null, modelData[relation]) # varför returnera något här? testa vad som ska komma tillbaka
+  deleteManyRelation = (element, relation, id, callback) ->
+    element[relation] = element[relation].filter (x) -> x != id
+    setImmediate(callback)
 
 
+  lockInsertion = do ->
+    insertOps = []
 
-    postMany: mustHaveModel (model, id1, relation, id2, callback) ->
-      relationInfo = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
-
-      if !relationInfo?
-        later(callback, new Error('Invalid many-to-many property'))
-        return
-
-      inverseModel = relationInfo.ref
-      inverseField = relationInfo.inverseName
+    (model, id1, relation, id2, inverseModel, inverseField, callback, next) ->
 
       insertOpNow = [
         { primaryModel: model, primaryId: id1, propertyName: relation, secondaryId: id2 }
@@ -254,23 +171,115 @@ exports.create = ->
       hasAlready = insertOps.some((x) -> insertOpNow.some((y) -> insertOpMatch(x, y)))
 
       if hasAlready
-        setImmediate ->
-          callback(null, { status: 'insert already in progress' })
+        # ännu bättre vore kanske att vänta på processen som håller på att stoppa in den och sedan returnera samtidigt?
+        # mycket mer användbart!
+        callback(null, { status: 'insert already in progress' })
         return
 
       insertOpNow.forEach (op) ->
         insertOps.push(op)
 
-
-      # måste ju testa att denna releasas också.. utan detta så blir det lite tokigt..
-      # Testa genom att ta bort en manyToMany som lagts till. Efter det måste det gå att lägga in den på nytt.
-      # insertOps = insertOps.filter (x) -> !_(insertOpNow).contains(x)
-
-
-      model1 = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
-      model2 = filterList(getStore(inverseModel), { id: id2 })[0] # vad händer om denna har en längd på noll?
-
       setImmediate ->
-        model1[relation].push(id2) # vad händer om denna redan finns i data settet?
-        model2[inverseField].push(id1) # vad händer om denna redan finns i data settet?
-        callback(null, { status: 'inserted' })
+        next (args...) ->
+          args = [null, { status: 'inserted' }] if args.length == 0
+          insertOps = insertOps.filter (x) -> !_(insertOpNow).contains(x)
+          callback(args...)
+
+
+
+
+
+  api =
+    connect: delayCallback (connData, rest..., callback) ->
+      [inputModels] = rest
+      return callback(new Error("Invalid connection data. Please use an empty object.")) if typeof connData != 'object'
+      dbObj = connData
+      dbObj.collections ?= {}
+      if inputModels
+        api.load(inputModels, callback)
+      else
+        initDb()
+        callback()
+
+    close: delayCallback (callback) ->
+      callback()
+
+    load: delayCallback (models, callback) ->
+      dbModel = tools.desugar(models)
+      dbMetaModel = tools.getMeta(dbModel)
+      initDb()
+      callback()
+
+    connectionData: ->
+      dbObj
+
+    post: mustHaveModel delayCallback (model, indata, callback) ->
+      preprocessInput model, indata, true, propagate callback, (processedInput) ->
+        input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
+        return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
+        ensureManyToManyIsArrays(model, input)
+        getStore(model).push(input)
+        callback(null, input)
+
+    list: mustHaveModel delayCallback (model, filter, callback) ->
+      result = filterList(getStore(model), filter)
+      defaultSort = dbModel[model].defaultSort
+      result = _(result).sortBy(defaultSort) if defaultSort
+      callback(null, result)
+
+    getOne: mustHaveModel delayCallback (model, config, callback) ->
+      filter = config.filter ? {}
+      api.list model, filter, propagate callback, (data) ->
+        return callback(new Error('No such id')) if data.length == 0 && Object.keys(filter).length == 1 && 'id' of filter
+        return callback(new Error('No match')) if data.length == 0
+        callback(null, data[0])
+
+    putOne: mustHaveModel delayCallback (model, data, filter, callback) ->
+      filterOne model, filter, propagate callback, (result) ->
+        preprocessInput model, data, false, propagate callback, (d2) ->
+          _.extend(result, d2)
+          ensureManyToManyIsArrays(model, result)
+          callback(null, result)
+
+    delOne: mustHaveModel delayCallback (model, filter, callback) ->
+      filterOne model, filter, propagate callback, (result) ->
+        deleteObj(model, result)
+        callback(null, result)
+
+    getMany: mustHaveModel delayCallback (model, id, relation, filterData, callback) ->
+      if !callback
+        callback = filterData
+        filterData = {}
+
+      getManyToManyMeta model, relation, propagate callback, (metadata) ->
+        getModelDataById model, id, propagate callback, (modelData) ->
+          res1 = getStore(metadata.ref)
+          res2 = res1.filter (x) -> x.id in (modelData[relation] || [])
+          res3 = filterList(res2, filterData)
+          callback(null, res3)
+
+    delMany: mustHaveModel delayCallback (model, id1, relation, id2, callback) ->
+      getManyToManyMeta model, relation, propagate callback, (metadata) ->
+        getModelDataById model, id1, propagate callback, (modelData) ->
+          getModelDataById metadata.ref, id2, propagate callback, (modelData2) ->
+            deleteManyRelation modelData, relation, id2, propagate callback, ->
+              deleteManyRelation modelData2, metadata.inverseName, id1, propagate callback, ->
+                callback()
+
+    postMany: mustHaveModel (model, id1, relation, id2, callback) ->
+      getManyToManyMeta model, relation, propagate callback, (relationInfo) ->
+        getModelDataById model, id1, propagate callback, (model1) ->
+          getModelDataById relationInfo.ref, id2, propagate callback, (model2) ->
+            lockInsertion model, id1, relation, id2, relationInfo.ref, relationInfo.inverseName, callback, (done) ->
+
+              has1 = id2 in model1[relation]
+              has2 = id1 in model2[relationInfo.inverseName]
+
+              if has1 && has2
+                done(null, { status: 'already inserted' })
+              else if !has1 && !has2
+                model1[relation].push(id2)
+                model2[relationInfo.inverseName].push(id1)
+                done()
+              else
+                done(new Error("How the fuck did this happen? Totally invalid state!"))
