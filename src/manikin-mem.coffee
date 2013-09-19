@@ -129,6 +129,11 @@ exports.create = ->
         input[name] = []
 
 
+  insertOps = []
+
+
+
+
   api =
     connect: (connData, rest..., callback) ->
       [inputModels] = rest
@@ -139,16 +144,16 @@ exports.create = ->
         api.load(inputModels, callback)
       else
         initDb()
-        later(callback)
+        setImmediate(callback)
 
     close: (callback) ->
-      later(callback)
+      setImmediate(callback)
 
     load: (models, callback) ->
       dbModel = tools.desugar(models)
       dbMetaModel = tools.getMeta(dbModel)
       initDb()
-      later(callback)
+      setImmediate(callback)
 
     connectionData: ->
       dbObj
@@ -158,7 +163,7 @@ exports.create = ->
         input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
         return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
         ensureManyToManyIsArrays(model, input)
-        later ->
+        setImmediate ->
           getStore(model).push(input)
           callback(null, input)
 
@@ -178,7 +183,7 @@ exports.create = ->
     putOne: mustHaveModel (model, data, filter, callback) ->
       filterOne model, filter, propagate callback, (result) ->
         preprocessInput model, data, false, propagate callback, (d2) ->
-          later ->
+          setImmediate ->
             _.extend(result, d2)
             ensureManyToManyIsArrays(model, result)
             callback(null, result)
@@ -186,7 +191,7 @@ exports.create = ->
     delOne: mustHaveModel (model, filter, callback) ->
       self = @
       filterOne model, filter, propagate callback, (result) ->
-        later ->
+        setImmediate ->
           deleteObj(model, result)
           callback(null, result)
 
@@ -200,8 +205,8 @@ exports.create = ->
       metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
       modelData = filterList(getStore(model), { id })[0] # vad händer om denna har en längd på noll?
 
-      later ->
-        result = getStore(metadata.ref) # läser in hela datasettet. lite crazy.
+      setImmediate ->
+        result = getStore(metadata.ref)
         res = result.filter (x) -> x.id in (modelData[relation] || [])
         res = filterList(res, filterData)
         callback(null, res)
@@ -209,30 +214,63 @@ exports.create = ->
 
 
     delMany: mustHaveModel (model, id1, relation, id2, callback) ->
-      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0] # om noll matches?
+      metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
+
+      if !metadata?
+        later(callback, new Error('Invalid many-to-many property'))
+        return
+
       modelData = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
       modelData2 = filterList(getStore(metadata.ref), { id: id2 })[0] # vad händer om denna har en längd på noll?
 
-      later ->
+      setImmediate ->
         modelData[relation] = modelData[relation].filter (x) -> x != id2
         modelData2[metadata.inverseName] = modelData2[metadata.inverseName].filter (x) -> x != id1
-        callback(null, modelData[relation]) # varför returnera något här?
+        callback(null, modelData[relation]) # varför returnera något här? testa vad som ska komma tillbaka
 
 
 
     postMany: mustHaveModel (model, id1, relation, id2, callback) ->
-      relationInfo = dbModel[model].fields[relation] # vad gör man om relationInfo inte finns?
+      relationInfo = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
 
-      inverseModel = relationInfo.model
+      if !relationInfo?
+        later(callback, new Error('Invalid many-to-many property'))
+        return
+
+      inverseModel = relationInfo.ref
       inverseField = relationInfo.inverseName
+
+      insertOpNow = [
+        { primaryModel: model, primaryId: id1, propertyName: relation, secondaryId: id2 }
+        { primaryModel: inverseModel, primaryId: id2, propertyName: inverseField, secondaryId: id1 }
+      ]
+
+      insertOpMatch = (x1, x2) ->
+        x1.primaryModel == x2.primaryModel &&
+        x1.primaryId    == x2.primaryId    &&
+        x1.propertyName == x2.propertyName &&
+        x1.secondaryId  == x2.secondaryId
+
+      hasAlready = insertOps.some((x) -> insertOpNow.some((y) -> insertOpMatch(x, y)))
+
+      if hasAlready
+        setImmediate ->
+          callback(null, { status: 'insert already in progress' })
+        return
+
+      insertOpNow.forEach (op) ->
+        insertOps.push(op)
+
+
+      # måste ju testa att denna releasas också.. utan detta så blir det lite tokigt..
+      # Testa genom att ta bort en manyToMany som lagts till. Efter det måste det gå att lägga in den på nytt.
+      # insertOps = insertOps.filter (x) -> !_(insertOpNow).contains(x)
+
 
       model1 = filterList(getStore(model), { id: id1 })[0] # vad händer om denna har en längd på noll?
       model2 = filterList(getStore(inverseModel), { id: id2 })[0] # vad händer om denna har en längd på noll?
 
-      later ->
+      setImmediate ->
         model1[relation].push(id2) # vad händer om denna redan finns i data settet?
         model2[inverseField].push(id1) # vad händer om denna redan finns i data settet?
-        callback()
-
-
-
+        callback(null, { status: 'inserted' })
