@@ -33,6 +33,13 @@ owns = (dbModel, ownerModel) ->
     _.pairs(owners).filter(([singular, plural]) -> plural == ownerModel).map ([singular, plural]) ->
       { model: model, field: singular }
 
+modelToHasOnes = (dbModel) ->
+  apa = _.flatten _.pairs(dbModel).map ([modelName, modelData]) ->
+    fields = _.pairs(modelData.fields).filter(([fieldName, fieldData]) -> fieldData.type == 'hasOne')
+    .map ([fieldName, fieldData]) -> { targetModel: fieldData.model, inModel: modelName, fieldName }
+  _.groupBy(apa, 'targetModel')
+
+
 formatField = (info, data) ->
   if info.type == 'date'
     toDateTimeFormat(data)
@@ -69,34 +76,54 @@ exports.create = ->
       return later(callback, new Error("No model named #{model}")) if !dbModel[model]
       f.apply(this, arguments)
 
+  ensureHasOnesExist = (model, data, callback) ->
+    hasOnes = _.pairs(dbModel[model].fields).filter(([key, {type}]) -> type == 'hasOne').map ([key]) -> key
+    keys = _.object _.pairs(_.pick(data, hasOnes)).filter(([key, value]) -> value?)
+    async.forEach _.pairs(keys), ([key, value], callback) ->
+      model = dbModel[model].fields[key].model
+      filterOne model, { id: value }, (err, apa) ->
+        return callback(new Error("Invalid hasOne-key for '#{key}'")) if err?
+        callback()
+    , callback
+
   preprocessInput = (model, data, includeDefaults, callback) ->
     inputKeys = Object.keys(data) # Detta hanterar inte nestade properties
     validKeys = Object.keys(dbModel[model].fields).concat(Object.keys(dbModel[model].owners))
     invalidKeys = _.difference(inputKeys, validKeys)
     return callback(new Error("Invalid fields: #{invalidKeys.join(', ')}")) if invalidKeys.length > 0
-
-    out = {}
-    async.forEach _.pairs(dbModel[model].fields), ([name, info], callback) ->
-      return callback() if !includeDefaults && name not of data
-      out[name] = formatField(info, data[name])
-      validation = info.validate || defaultValidator
-      validation api, out[name], (isOk) ->
-        return callback() if isOk 
-        er = new Error("Validation failed")
-        er.errors = { name: path: name }
-        callback(er)
-    , (err) ->
-      callback(err, out)
+    ensureHasOnesExist model, data, propagate callback, ->
+      out = {}
+      async.forEach _.pairs(dbModel[model].fields), ([name, info], callback) ->
+        return callback() if !includeDefaults && name not of data
+        out[name] = formatField(info, data[name])
+        validation = info.validate || defaultValidator
+        validation api, out[name], (isOk) ->
+          return callback() if isOk
+          er = new Error("Validation failed")
+          er.errors = { name: path: name }
+          callback(er)
+      , (err) ->
+        callback(err, out)
 
   deleteObjFromManyToManyRelations = (model, obj) ->
     dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
       getStore(ref).forEach (x) ->
         x[inverseName] = x[inverseName].filter (s) -> s != obj.id
 
+  deleteObjFromOneToManyRelations = (model, obj) ->
+    whatToDelete = modelToHasOnes(dbModel)[model] || []
+    whatToDelete.forEach ({ inModel, fieldName }) ->
+      filt = _.object([[fieldName, obj.id]])
+      result = filterList(getStore(inModel), filt)
+      result.forEach (r) ->
+        r[fieldName] = null
+
+
   deleteObj = (model, obj) ->
     index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
     deleteObjFromManyToManyRelations(model, obj)
+    deleteObjFromOneToManyRelations(model, obj)
     getStore(model).splice(index, 1)
     owns(dbModel, model).forEach ({ model, field }) ->
       delAll(model, _.object([[field, obj.id]]))
