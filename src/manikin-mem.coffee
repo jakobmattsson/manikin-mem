@@ -1,21 +1,14 @@
 async = require 'async'
 _ = require 'underscore'
 tools = require 'manikin-tools'
+xdate = require 'xdate'
 
 if typeof setImmediate == 'undefined'
   setImmediate = (f) -> setTimeout(f, 0)
 
 later = (f, args...) -> setImmediate(f.bind(null, args...))
 
-## denna måste beräknas på riktigt. utan timeCounter
-toDateTimeFormat = do ->
-  timeCounter = 0
-  (x) ->
-    ++timeCounter
-    if timeCounter < 3
-      "2012-10-15T00:00:00.000Z"
-    else
-      "2012-10-15T13:37:00.000Z"
+toDateTimeFormat = (x) -> new xdate(x, true).toString('yyyy-MM-dd HH:mm:ss.fffzz').replace(' ', 'T')
 
 filterList = (data, filter = {}) ->
   keys = Object.keys(filter)
