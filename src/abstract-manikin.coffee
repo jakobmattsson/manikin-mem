@@ -142,16 +142,21 @@ exports.create = (abstracts) ->
         if inputModels
           api.load(inputModels, callback)
         else
-          initDb()
-          callback()
+          if dbModel123?
+            initDb(callback)
+          else
+            callback()
 
     close: delayCallback apiClose
 
     load: delayCallback (models, callback) ->
       dbModel123 = tools.desugar(models)
       dbMetaModel = tools.getMeta(dbModel123)
-      initDb()
-      callback()
+
+      if connectionDataObj?
+        initDb(callback)
+      else
+        callback()
 
     connectionData: -> connectionDataObj
     getDbModel: -> dbModel123
@@ -166,6 +171,7 @@ exports.create = (abstracts) ->
 
     list: mustHaveModel delayCallback listSorted
 
+    # Inneffektiv implementation. Borde inte hämta ALLA objekt; bättre att ha en atomär operation till i så fall.
     getOne: mustHaveModel delayCallback (model, config, callback) ->
       filter = config.filter ? {}
       api.list model, filter, propagate callback, (data) ->

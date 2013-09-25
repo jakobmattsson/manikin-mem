@@ -3,6 +3,7 @@ _ = require 'underscore'
 tools = require 'manikin-tools'
 xdate = require 'xdate'
 absManikin = require './abstract-manikin'
+{owns, modelToHasOnes, expectedHasOnes} = require './util'
 
 if typeof setImmediate == 'undefined'
   setImmediate = (f) -> setTimeout(f, 0)
@@ -13,29 +14,6 @@ filterList = (data, filter = {}) ->
     keys.every (k) -> x[k] == filter[k]
 
 propagate = (onErr, onSucc) -> (err, rest...) -> if err? then onErr(err) else onSucc(rest...)
-
-owns = (dbModel, ownerModel) ->
-  _.flatten _.pairs(dbModel).map ([model, {owners, indirectOwners}]) ->
-    _.pairs(owners).filter(([singular, plural]) -> plural == ownerModel).map ([singular, plural]) ->
-      { model: model, field: singular }
-
-modelToHasOnes = (dbModel) ->
-  apa = _.flatten _.pairs(dbModel).map ([modelName, modelData]) ->
-    fields = _.pairs(modelData.fields).filter(([fieldName, fieldData]) -> fieldData.type == 'hasOne')
-    .map ([fieldName, fieldData]) -> { targetModel: fieldData.model, inModel: modelName, fieldName }
-  _.groupBy(apa, 'targetModel')
-
-createId = do ->
-  counter = 0
-  -> "uid#{++counter}"
-
-expectedHasOnes = (dbModel, model, data) ->
-  hasOnes = _.pairs(dbModel[model].fields).filter(([key, {type}]) -> type == 'hasOne').map ([key]) -> key
-  keys = _.object _.pairs(_.pick(data, hasOnes)).filter(([key, value]) -> value?)
-  _.pairs(keys).map ([key, value]) ->
-    model = dbModel[model].fields[key].model
-    { model, key, id: value }
-
 
 
 exports.create = ->
@@ -48,11 +26,6 @@ exports.create = ->
       dbObj.collections[name]
     else
       dbObj.collections
-
-  initDb = ->
-    if getModel()? && dbObj?
-      Object.keys(getModel()).forEach (key) ->
-        getStore()[key] = []
 
   ensureHasOnesExist = (model, data, callback) ->
     expected = expectedHasOnes(getModel(), model, data)
@@ -159,13 +132,16 @@ exports.create = ->
       result = _(result).sortBy(defaultSort) if defaultSort
       callback(null, result)
 
+    initDb: (callback) ->
+      Object.keys(getModel()).forEach (key) ->
+        getStore()[key] = []
+      callback()
 
+    ensureHasOnesExist # lite weird namn, men den behöver vara här. dependar på en av de andra funktionerna också.. mindre nice..
+    filterOne # denna är det som dependas på. kan det lösas?
+    
 
-
-    initDb # what is this really??
-    ensureHasOnesExist # lite weird namn, men den behöver vara här
     setOwnerData # den ska fixas till!
-    filterOne
     deleteObj # improve in terms of atomicity
   })
   getModel = absApi.getDbModel
