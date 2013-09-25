@@ -2,6 +2,7 @@ async = require 'async'
 _ = require 'underscore'
 tools = require 'manikin-tools'
 xdate = require 'xdate'
+absManikin = require './abstract-manikin'
 
 if typeof setImmediate == 'undefined'
   setImmediate = (f) -> setTimeout(f, 0)
@@ -80,7 +81,7 @@ exports.create = ->
 
   api = {}
   dbObj = null
-  dbModel = null
+  dbModel123 = null
   dbMetaModel = null
 
   getStore = (name) ->
@@ -89,19 +90,21 @@ exports.create = ->
     else
       dbObj.collections
 
+  getModel = -> dbModel123
+
   initDb = ->
-    if dbModel? && dbObj?
-      Object.keys(dbModel).forEach (key) ->
+    if getModel()? && dbObj?
+      Object.keys(getModel()).forEach (key) ->
         getStore()[key] = []
 
   mustHaveModel = (f) ->
     (model, args..., callback) ->
-      throw new Error("No model defined") if !dbModel?
-      return later(callback, new Error("No model named #{model}")) if !dbModel[model]
+      throw new Error("No model defined") if !getModel()?
+      return later(callback, new Error("No model named #{model}")) if !getModel()[model]
       f.apply(this, arguments)
 
   ensureHasOnesExist = (model, data, callback) ->
-    expected = expectedHasOnes(dbModel, model, data)
+    expected = expectedHasOnes(getModel(), model, data)
     async.forEach expected, ({model,id,key}, callback) ->
       filterOne model, { id }, (err) ->
         return callback(new Error("Invalid hasOne-key for '#{key}'")) if err?
@@ -109,7 +112,7 @@ exports.create = ->
     , callback
 
   preprocessInput = (model, data, includeDefaults, callback) ->
-    preprocessInputCore(dbModel, model, data, includeDefaults, ensureHasOnesExist, api, callback)
+    preprocessInputCore(getModel(), model, data, includeDefaults, ensureHasOnesExist, api, callback)
 
   deleteObjFromManyToManyRelations = (model, obj) ->
     dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
@@ -117,7 +120,7 @@ exports.create = ->
         x[inverseName] = x[inverseName].filter (s) -> s != obj.id
 
   deleteObjFromOneToManyRelations = (model, obj) ->
-    whatToDelete = modelToHasOnes(dbModel)[model] || []
+    whatToDelete = modelToHasOnes(getModel())[model] || []
     whatToDelete.forEach ({ inModel, fieldName }) ->
       filt = _.object([[fieldName, obj.id]])
       result = filterList(getStore(inModel), filt)
@@ -130,7 +133,7 @@ exports.create = ->
     deleteObjFromManyToManyRelations(model, obj)
     deleteObjFromOneToManyRelations(model, obj)
     getStore(model).splice(index, 1)
-    owns(dbModel, model).forEach ({ model, field }) ->
+    owns(getModel(), model).forEach ({ model, field }) ->
       delAll(model, _.object([[field, obj.id]]))
 
   delAll = (model, filter) ->
@@ -145,12 +148,12 @@ exports.create = ->
 
   setOwnerData = (model, indata) ->
     input = {}
-    _.pairs(dbModel[model].owners).forEach ([singular, plural]) ->
+    _.pairs(getModel()[model].owners).forEach ([singular, plural]) ->
       matches = filterList(getStore(plural), { id: indata[singular] })
       match = matches[0]
       if matches.length == 1
         input[singular] = indata[singular]
-        Object.keys(dbModel[model].indirectOwners).forEach (key) ->
+        Object.keys(getModel()[model].indirectOwners).forEach (key) ->
           input[key] = match[key]
     input
 
@@ -173,9 +176,30 @@ exports.create = ->
     else
       callback(null, modelData)
 
+  appendToCollection = (collection, entry, callback) ->
+    getStore(collection).push(entry)
+    callback(null, entry)
+
   deleteManyRelation = (element, relation, id, callback) ->
     element[relation] = element[relation].filter (x) -> x != id
     setImmediate(callback)
+
+  listSorted = (model, filter, callback) ->
+    result = filterList(getStore(model), filter)
+    defaultSort = getModel()[model].defaultSort
+    result = _(result).sortBy(defaultSort) if defaultSort
+    callback(null, result)
+
+  listWithIdLimit = (model, filter, ids, callback) ->
+    res1 = getStore(model)
+    res2 = res1.filter (x) -> x.id in ids
+    res3 = filterList(res2, filter)
+    callback(null, res3)
+
+  addManyToMany = (entry, property, value, callback) ->
+    entry[property].push(value)
+    callback()
+
 
   lockInsertion = do ->
     insertOps = []
@@ -226,8 +250,8 @@ exports.create = ->
       callback()
 
     load: delayCallback (models, callback) ->
-      dbModel = tools.desugar(models)
-      dbMetaModel = tools.getMeta(dbModel)
+      dbModel123 = tools.desugar(models)
+      dbMetaModel = tools.getMeta(dbModel123)
       initDb()
       callback()
 
@@ -237,16 +261,11 @@ exports.create = ->
     post: mustHaveModel delayCallback (model, indata, callback) ->
       preprocessInput model, indata, true, propagate callback, (processedInput) ->
         input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
-        return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(dbModel[model].owners).some((x) -> !input[x]?)
+        return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(getModel()[model].owners).some((x) -> !input[x]?)
         ensureManyToManyIsArrays(model, input)
-        getStore(model).push(input)
-        callback(null, input)
+        appendToCollection(model, input, callback)
 
-    list: mustHaveModel delayCallback (model, filter, callback) ->
-      result = filterList(getStore(model), filter)
-      defaultSort = dbModel[model].defaultSort
-      result = _(result).sortBy(defaultSort) if defaultSort
-      callback(null, result)
+    list: mustHaveModel delayCallback listSorted
 
     getOne: mustHaveModel delayCallback (model, config, callback) ->
       filter = config.filter ? {}
@@ -256,8 +275,8 @@ exports.create = ->
         callback(null, data[0])
 
     putOne: mustHaveModel delayCallback (model, data, filter, callback) ->
-      filterOne model, filter, propagate callback, (result) ->
-        preprocessInput model, data, false, propagate callback, (d2) ->
+      preprocessInput model, data, false, propagate callback, (d2) ->
+        filterOne model, filter, propagate callback, (result) ->
           _.extend(result, d2)
           ensureManyToManyIsArrays(model, result)
           callback(null, result)
@@ -274,10 +293,7 @@ exports.create = ->
 
       getManyToManyMeta model, relation, propagate callback, (metadata) ->
         getModelDataById model, id, propagate callback, (modelData) ->
-          res1 = getStore(metadata.ref)
-          res2 = res1.filter (x) -> x.id in (modelData[relation] || [])
-          res3 = filterList(res2, filterData)
-          callback(null, res3)
+          listWithIdLimit(metadata.ref, filterData, modelData[relation] || [], callback)
 
     delMany: mustHaveModel delayCallback (model, id1, relation, id2, callback) ->
       getManyToManyMeta model, relation, propagate callback, (metadata) ->
@@ -299,8 +315,8 @@ exports.create = ->
               if has1 && has2
                 done(null, { status: 'already inserted' })
               else if !has1 && !has2
-                model1[relation].push(id2)
-                model2[relationInfo.inverseName].push(id1)
-                done()
+                addManyToMany model1, relation, id2, propagate done, ->
+                  addManyToMany model2, relationInfo.inverseName, id1, propagate done, ->
+                    done()
               else
                 done(new Error("How the fuck did this happen? Totally invalid state!"))
