@@ -18,7 +18,6 @@ propagate = (onErr, onSucc) -> (err, rest...) -> if err? then onErr(err) else on
 
 exports.create = ->
 
-  api = {}
   dbObj = null
 
   getStore = (name) ->
@@ -35,44 +34,56 @@ exports.create = ->
         callback()
     , callback
 
+
+
+
+  manyToManysToDelete = (model, obj) ->
+    getMetaModel()[model].manyToMany.map ({ ref, inverseName }) -> { model: ref, relation: inverseName, id: obj.id }
+
   deleteObjFromManyToManyRelations = (model, obj, callback) ->
-    getMetaModel()[model].manyToMany.forEach ({ ref, inverseName }) ->
-      getStore(ref).forEach (x) ->
-        x[inverseName] = x[inverseName].filter (s) -> s != obj.id
-    callback()
+    deleteFromRelations(manyToManysToDelete(model, obj), callback)
 
   hasOnesToDelete = (model, obj) ->
     whatToDelete = modelToHasOnes(getModel())[model] || []
     whatToDelete.map ({ inModel, fieldName }) -> { model: inModel, field: fieldName, value: obj.id }
 
   deleteObjFromOneToManyRelations = (model, obj, callback) ->
-    toDelete = hasOnesToDelete(model, obj)
-    setMatchesToNull(toDelete, callback)
+    setFieldsToNull(hasOnesToDelete(model, obj), callback)
 
-  setMatchesToNull = (list, callback) ->
+  deleteObj = (model, obj, callback) ->
+    deleteObjFromManyToManyRelations model, obj, propagate callback, ->
+      deleteObjFromOneToManyRelations model, obj, propagate callback, ->
+        atomicDelete model, obj, propagate callback, ->
+          async.forEach owns(getModel(), model), ({ model, field }, callback) ->
+            delAll(model, _.object([[field, obj.id]]), callback)
+          , callback
+
+  delAll = (model, filter, callback) ->
+    result = filterList(getStore(model), filter) # byt ut denna mot en vanlig "list" med filter
+    async.forEach result, (r, callback) ->
+      deleteObj(model, r, callback)
+    , callback
+
+
+  deleteFromRelations = (list, callback) ->
+    list.forEach ({ model, relation, id }) ->
+      getStore(model).forEach (x) ->
+        x[relation] = x[relation].filter (s) -> s != id
+    callback()
+
+  setFieldsToNull = (list, callback) ->
     list.forEach ({ model, field, value }) ->
       result = filterList(getStore(model), _.object([[field, value]]))
       result.forEach (r) ->
         r[field] = null
     callback()
 
-  # Det som denna gör borde kunna abstraheras mer. Den borde bestå av ett par stycken primitiver.
-  deleteObj = (model, obj, callback) ->
+  atomicDelete = (model, obj, callback) ->
     index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
-    deleteObjFromManyToManyRelations model, obj, ->
-      deleteObjFromOneToManyRelations model, obj, ->
-        getStore(model).splice(index, 1)
+    getStore(model).splice(index, 1)
+    callback()
 
-        async.forEach owns(getModel(), model), ({ model, field }, callback) ->
-          delAll(model, _.object([[field, obj.id]]), callback)
-        , callback
-
-  delAll = (model, filter, callback) ->
-    result = filterList(getStore(model), filter)
-    async.forEach result, (r, callback) ->
-      deleteObj(model, r, callback)
-    , callback
 
   filterOne = (model, filter, callback) ->
     result = filterList(getStore(model), filter)
