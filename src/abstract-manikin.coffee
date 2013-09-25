@@ -73,7 +73,6 @@ exports.create = (abstracts) ->
     apiClose
     initDb
     ensureHasOnesExist
-    setOwnerData
     appendToCollection
     getApi
   } = abstracts
@@ -85,6 +84,18 @@ exports.create = (abstracts) ->
   getModel = -> dbModel123
   getMetaModel = -> dbMetaModel
 
+  setOwnerData = (model, indata, callback) ->
+    input = {}
+    async.forEach _.pairs(getModel()[model].owners), ([singular, plural], callback) ->
+      getModelDataById plural, indata[singular], propagate callback, (match) ->
+        input[singular] = indata[singular]
+        Object.keys(getModel()[model].indirectOwners).forEach (key) ->
+          input[key] = match[key]
+        callback()
+    , propagate callback, ->
+      callback(null, input)
+
+  # detta är helt fel. det är inte alls säkert att manyToMany är lagrad som en array för den abstraka manikin-implementationen!
   ensureManyToManyIsArrays = (model, input) ->
     getMetaModel()[model].manyToMany.map ({name}) ->
       if !Array.isArray(input[name])
@@ -102,10 +113,6 @@ exports.create = (abstracts) ->
       callback(new Error('Invalid many-to-many property'))
     else
       callback(null, metadata)
-
-  ownersAreSet = (model, input, callback) ->
-    return callback(new Error("Must give owner k thx plz ._0")) if Object.keys(getModel()[model].owners).some((x) -> !input[x]?)
-    callback()
 
   preprocessInput = (model, data, includeDefaults, callback) ->
     preprocessInputCore(model, data, includeDefaults, ensureHasOnesExist, getApi(), callback)
@@ -164,10 +171,11 @@ exports.create = (abstracts) ->
 
     post: mustHaveModel delayCallback (model, indata, callback) ->
       preprocessInput model, indata, true, propagate callback, (processedInput) ->
-        input = _.extend({}, processedInput, setOwnerData(model, indata), { id: createId() })
-        ownersAreSet model, input, propagate callback, ->
+        setOwnerData model, indata, propagate callback, (ownerData) ->
+          input = _.extend({}, processedInput, ownerData, { id: createId() })
           ensureManyToManyIsArrays(model, input)
           appendToCollection(model, input, callback)
+
 
     list: mustHaveModel delayCallback listSorted
 

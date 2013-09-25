@@ -68,16 +68,6 @@ exports.create = ->
     return callback(new Error("No such id")) if result.length == 0
     callback(null, result[0])
 
-  setOwnerData = (model, indata) ->
-    input = {}
-    _.pairs(getModel()[model].owners).forEach ([singular, plural]) ->
-      matches = filterList(getStore(plural), { id: indata[singular] })
-      match = matches[0]
-      if matches.length == 1
-        input[singular] = indata[singular]
-        Object.keys(getModel()[model].indirectOwners).forEach (key) ->
-          input[key] = match[key]
-    input
 
 
 
@@ -141,7 +131,6 @@ exports.create = ->
     filterOne # denna är det som dependas på. kan det lösas?
     
 
-    setOwnerData # den ska fixas till!
     deleteObj # improve in terms of atomicity
   })
   getModel = absApi.getDbModel
