@@ -35,33 +35,44 @@ exports.create = ->
         callback()
     , callback
 
-  deleteObjFromManyToManyRelations = (model, obj) ->
+  deleteObjFromManyToManyRelations = (model, obj, callback) ->
     getMetaModel()[model].manyToMany.forEach ({ ref, inverseName }) ->
       getStore(ref).forEach (x) ->
         x[inverseName] = x[inverseName].filter (s) -> s != obj.id
+    callback()
 
-  deleteObjFromOneToManyRelations = (model, obj) ->
+  hasOnesToDelete = (model, obj) ->
     whatToDelete = modelToHasOnes(getModel())[model] || []
-    whatToDelete.forEach ({ inModel, fieldName }) ->
-      filt = _.object([[fieldName, obj.id]])
-      result = filterList(getStore(inModel), filt)
+    whatToDelete.map ({ inModel, fieldName }) -> { model: inModel, field: fieldName, value: obj.id }
+
+  deleteObjFromOneToManyRelations = (model, obj, callback) ->
+    toDelete = hasOnesToDelete(model, obj)
+    setMatchesToNull(toDelete, callback)
+
+  setMatchesToNull = (list, callback) ->
+    list.forEach ({ model, field, value }) ->
+      result = filterList(getStore(model), _.object([[field, value]]))
       result.forEach (r) ->
-        r[fieldName] = null
+        r[field] = null
+    callback()
 
   # Det som denna gör borde kunna abstraheras mer. Den borde bestå av ett par stycken primitiver.
-  deleteObj = (model, obj) ->
+  deleteObj = (model, obj, callback) ->
     index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
-    deleteObjFromManyToManyRelations(model, obj)
-    deleteObjFromOneToManyRelations(model, obj)
-    getStore(model).splice(index, 1)
-    owns(getModel(), model).forEach ({ model, field }) ->
-      delAll(model, _.object([[field, obj.id]]))
+    deleteObjFromManyToManyRelations model, obj, ->
+      deleteObjFromOneToManyRelations model, obj, ->
+        getStore(model).splice(index, 1)
 
-  delAll = (model, filter) ->
+        async.forEach owns(getModel(), model), ({ model, field }, callback) ->
+          delAll(model, _.object([[field, obj.id]]), callback)
+        , callback
+
+  delAll = (model, filter, callback) ->
     result = filterList(getStore(model), filter)
-    result.forEach (r) ->
-      deleteObj(model, r)
+    async.forEach result, (r, callback) ->
+      deleteObj(model, r, callback)
+    , callback
 
   filterOne = (model, filter, callback) ->
     result = filterList(getStore(model), filter)

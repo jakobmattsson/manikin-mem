@@ -196,8 +196,8 @@ exports.create = (abstracts) ->
 
     delOne: mustHaveModel delayCallback (model, filter, callback) ->
       filterOne model, filter, propagate callback, (result) ->
-        deleteObj(model, result)
-        callback(null, result)
+        deleteObj model, result, propagate callback, ->
+          callback(null, result)
 
     getMany: mustHaveModel delayCallback (model, id, relation, filterData, callback) ->
       if !callback
