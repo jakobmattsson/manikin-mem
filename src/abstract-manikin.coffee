@@ -58,7 +58,6 @@ lockInsertion = do ->
 
 
 
-
 exports.create = (abstracts) ->
 
   {
@@ -72,7 +71,6 @@ exports.create = (abstracts) ->
     apiConnect
     apiClose
     initDb
-    ensureHasOnesExist
     appendToCollection
     getApi
     deleteFromRelations
@@ -117,6 +115,14 @@ exports.create = (abstracts) ->
     else
       callback(null, metadata)
 
+  ensureHasOnesExist = (model, data, callback) ->
+    expected = expectedHasOnes(getModel(), model, data)
+    async.forEach expected, ({model,id,key}, callback) ->
+      getModelDataById model, id, (err) ->
+        return callback(new Error("Invalid hasOne-key for '#{key}'")) if err?
+        callback()
+    , callback
+
   preprocessInput = (model, data, includeDefaults, callback) ->
     preprocessInputCore(model, data, includeDefaults, ensureHasOnesExist, getApi(), callback)
 
@@ -139,8 +145,6 @@ exports.create = (abstracts) ->
           callback(er)
       , (err) ->
         callback(err, out)
-
-
 
   manyToManysToDelete = (model, obj) ->
     getMetaModel()[model].manyToMany.map ({ ref, inverseName }) -> { model: ref, relation: inverseName, id: obj.id }
@@ -209,7 +213,6 @@ exports.create = (abstracts) ->
           input = _.extend({}, processedInput, ownerData, { id: createId() })
           ensureManyToManyIsArrays(model, input)
           appendToCollection(model, input, callback)
-
 
     list: mustHaveModel delayCallback listSorted
 

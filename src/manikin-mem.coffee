@@ -1,20 +1,10 @@
-async = require 'async'
 _ = require 'underscore'
-tools = require 'manikin-tools'
-xdate = require 'xdate'
 absManikin = require './abstract-manikin'
-{owns, modelToHasOnes, expectedHasOnes} = require './util'
-
-if typeof setImmediate == 'undefined'
-  setImmediate = (f) -> setTimeout(f, 0)
 
 filterList = (data, filter = {}) ->
   keys = Object.keys(filter)
   data.filter (x) ->
     keys.every (k) -> x[k] == filter[k]
-
-propagate = (onErr, onSucc) -> (err, rest...) -> if err? then onErr(err) else onSucc(rest...)
-
 
 exports.create = ->
 
@@ -25,31 +15,6 @@ exports.create = ->
       dbObj.collections[name]
     else
       dbObj.collections
-
-  ensureHasOnesExist = (model, data, callback) ->
-    expected = expectedHasOnes(getModel(), model, data)
-    async.forEach expected, ({model,id,key}, callback) ->
-      filterOne model, { id }, (err) ->
-        return callback(new Error("Invalid hasOne-key for '#{key}'")) if err?
-        callback()
-    , callback
-
-
-
-
-
-
-
-
-  filterOne = (model, filter, callback) ->
-    result = filterList(getStore(model), filter)
-    return callback(new Error("No such id")) if result.length == 0
-    callback(null, result[0])
-
-
-
-
-
 
   absApi = absManikin.create({
 
@@ -78,7 +43,6 @@ exports.create = ->
       res3 = filterList(res2, filter)
       callback(null, res3)
 
-    # Error message could be kept out of this. No need to impement the same text over and over.
     getModelDataById: (model, id, callback) ->
       modelData = filterList(getStore(model), { id })[0]
       if !modelData?
@@ -88,7 +52,7 @@ exports.create = ->
 
     deleteManyRelation: (element, relation, id, callback) ->
       element[relation] = element[relation].filter (x) -> x != id
-      setImmediate(callback)
+      callback()
 
     appendToCollection: (collection, entry, callback) ->
       getStore(collection).push(entry)
@@ -104,12 +68,6 @@ exports.create = ->
       Object.keys(getModel()).forEach (key) ->
         getStore()[key] = []
       callback()
-
-    ensureHasOnesExist # lite weird namn, men den behöver vara här. dependar på en av de andra funktionerna också.. mindre nice..
-    filterOne # denna är det som dependas på. kan det lösas?
-    
-
-
 
     deleteFromRelations: (list, callback) ->
       list.forEach ({ model, relation, id }) ->
@@ -129,6 +87,11 @@ exports.create = ->
       throw new Error("Impossible") if index == -1
       getStore(model).splice(index, 1)
       callback()
+
+    filterOne: (model, filter, callback) ->
+      result = filterList(getStore(model), filter)
+      return callback(new Error("No such id")) if result.length == 0
+      callback(null, result[0])
   })
   getModel = absApi.getDbModel
   getMetaModel = absApi.getMetaModel
