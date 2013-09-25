@@ -124,7 +124,6 @@ exports.create = ->
       result.forEach (r) ->
         r[fieldName] = null
 
-
   deleteObj = (model, obj) ->
     index = getStore(model).indexOf(obj)
     throw new Error("Impossible") if index == -1
@@ -155,14 +154,10 @@ exports.create = ->
           input[key] = match[key]
     input
 
-
   ensureManyToManyIsArrays = (model, input) ->
     dbMetaModel[model].manyToMany.map ({name}) ->
       if !Array.isArray(input[name])
         input[name] = []
-
-
-
 
   getManyToManyMeta = (model, relation, callback) ->
     metadata = dbMetaModel[model].manyToMany.filter((x) -> x.name == relation)[0]
@@ -181,7 +176,6 @@ exports.create = ->
   deleteManyRelation = (element, relation, id, callback) ->
     element[relation] = element[relation].filter (x) -> x != id
     setImmediate(callback)
-
 
   lockInsertion = do ->
     insertOps = []
@@ -215,10 +209,6 @@ exports.create = ->
           args = [null, { status: 'inserted' }] if args.length == 0
           insertOps = insertOps.filter (x) -> !_(insertOpNow).contains(x)
           callback(args...)
-
-
-
-
 
   api =
     connect: delayCallback (connData, rest..., callback) ->
