@@ -37,52 +37,8 @@ exports.create = ->
 
 
 
-  manyToManysToDelete = (model, obj) ->
-    getMetaModel()[model].manyToMany.map ({ ref, inverseName }) -> { model: ref, relation: inverseName, id: obj.id }
-
-  deleteObjFromManyToManyRelations = (model, obj, callback) ->
-    deleteFromRelations(manyToManysToDelete(model, obj), callback)
-
-  hasOnesToDelete = (model, obj) ->
-    whatToDelete = modelToHasOnes(getModel())[model] || []
-    whatToDelete.map ({ inModel, fieldName }) -> { model: inModel, field: fieldName, value: obj.id }
-
-  deleteObjFromOneToManyRelations = (model, obj, callback) ->
-    setFieldsToNull(hasOnesToDelete(model, obj), callback)
-
-  deleteObj = (model, obj, callback) ->
-    deleteObjFromManyToManyRelations model, obj, propagate callback, ->
-      deleteObjFromOneToManyRelations model, obj, propagate callback, ->
-        atomicDelete model, obj, propagate callback, ->
-          async.forEach owns(getModel(), model), ({ model, field }, callback) ->
-            delAll(model, _.object([[field, obj.id]]), callback)
-          , callback
-
-  delAll = (model, filter, callback) ->
-    result = filterList(getStore(model), filter) # byt ut denna mot en vanlig "list" med filter
-    async.forEach result, (r, callback) ->
-      deleteObj(model, r, callback)
-    , callback
 
 
-  deleteFromRelations = (list, callback) ->
-    list.forEach ({ model, relation, id }) ->
-      getStore(model).forEach (x) ->
-        x[relation] = x[relation].filter (s) -> s != id
-    callback()
-
-  setFieldsToNull = (list, callback) ->
-    list.forEach ({ model, field, value }) ->
-      result = filterList(getStore(model), _.object([[field, value]]))
-      result.forEach (r) ->
-        r[field] = null
-    callback()
-
-  atomicDelete = (model, obj, callback) ->
-    index = getStore(model).indexOf(obj)
-    throw new Error("Impossible") if index == -1
-    getStore(model).splice(index, 1)
-    callback()
 
 
   filterOne = (model, filter, callback) ->
@@ -153,7 +109,26 @@ exports.create = ->
     filterOne # denna är det som dependas på. kan det lösas?
     
 
-    deleteObj # improve in terms of atomicity
+
+
+    deleteFromRelations: (list, callback) ->
+      list.forEach ({ model, relation, id }) ->
+        getStore(model).forEach (x) ->
+          x[relation] = x[relation].filter (s) -> s != id
+      callback()
+
+    setFieldsToNull: (list, callback) ->
+      list.forEach ({ model, field, value }) ->
+        result = filterList(getStore(model), _.object([[field, value]]))
+        result.forEach (r) ->
+          r[field] = null
+      callback()
+
+    atomicDelete: (model, obj, callback) ->
+      index = getStore(model).indexOf(obj)
+      throw new Error("Impossible") if index == -1
+      getStore(model).splice(index, 1)
+      callback()
   })
   getModel = absApi.getDbModel
   getMetaModel = absApi.getMetaModel

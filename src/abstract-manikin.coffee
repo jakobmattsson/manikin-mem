@@ -2,6 +2,7 @@ async = require 'async'
 _ = require 'underscore'
 tools = require 'manikin-tools'
 xdate = require 'xdate'
+{owns, modelToHasOnes, expectedHasOnes} = require './util'
 
 if typeof setImmediate == 'undefined'
   setImmediate = (f) -> setTimeout(f, 0)
@@ -66,7 +67,6 @@ exports.create = (abstracts) ->
     getModelDataById
     deleteManyRelation
     filterOne
-    deleteObj
     listSorted
     createId
     apiConnect
@@ -75,6 +75,9 @@ exports.create = (abstracts) ->
     ensureHasOnesExist
     appendToCollection
     getApi
+    deleteFromRelations
+    setFieldsToNull
+    atomicDelete
   } = abstracts
 
   connectionDataObj = null
@@ -136,6 +139,37 @@ exports.create = (abstracts) ->
           callback(er)
       , (err) ->
         callback(err, out)
+
+
+
+  manyToManysToDelete = (model, obj) ->
+    getMetaModel()[model].manyToMany.map ({ ref, inverseName }) -> { model: ref, relation: inverseName, id: obj.id }
+
+  deleteObjFromManyToManyRelations = (model, obj, callback) ->
+    deleteFromRelations(manyToManysToDelete(model, obj), callback)
+
+  hasOnesToDelete = (model, obj) ->
+    whatToDelete = modelToHasOnes(getModel())[model] || []
+    whatToDelete.map ({ inModel, fieldName }) -> { model: inModel, field: fieldName, value: obj.id }
+
+  deleteObjFromOneToManyRelations = (model, obj, callback) ->
+    setFieldsToNull(hasOnesToDelete(model, obj), callback)
+
+  deleteObj = (model, obj, callback) ->
+    deleteObjFromManyToManyRelations model, obj, propagate callback, ->
+      deleteObjFromOneToManyRelations model, obj, propagate callback, ->
+        atomicDelete model, obj, propagate callback, ->
+          async.forEach owns(getModel(), model), ({ model, field }, callback) ->
+            delAll(model, _.object([[field, obj.id]]), callback)
+          , callback
+
+  # när denna hämtar sin lista så behöver den ju egentligen inte vara sorterad.. lite overkill
+  delAll = (model, filter, callback) ->
+    listSorted model, filter, propagate callback, (result) ->
+      async.forEach result, (r, callback) ->
+        deleteObj(model, r, callback)
+      , callback
+
 
 
 
