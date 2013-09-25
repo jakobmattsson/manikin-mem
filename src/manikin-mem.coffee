@@ -15,6 +15,8 @@ filterList = (data, filter = {}) ->
   data.filter (x) ->
     keys.every (k) -> x[k] == filter[k]
 
+delayCallback = (f) -> (args...) -> setImmediate => f(args...)
+
 deepCopy = (x) -> JSON.parse(JSON.stringify(x))
 
 defaultValidator = (api, value, callback) -> callback(true)
@@ -44,6 +46,35 @@ createId = do ->
   -> "uid#{++counter}"
 
 
+expectedHasOnes = (dbModel, model, data) ->
+  hasOnes = _.pairs(dbModel[model].fields).filter(([key, {type}]) -> type == 'hasOne').map ([key]) -> key
+  keys = _.object _.pairs(_.pick(data, hasOnes)).filter(([key, value]) -> value?)
+  _.pairs(keys).map ([key, value]) ->
+    model = dbModel[model].fields[key].model
+    { model, key, id: value }
+
+
+preprocessInputCore = (dbModel, model, data, includeDefaults, ensureHasOnesExist, api, callback) ->
+  inputKeys = Object.keys(data) # Detta hanterar inte nestade properties
+  validKeys = Object.keys(dbModel[model].fields).concat(Object.keys(dbModel[model].owners))
+  invalidKeys = _.difference(inputKeys, validKeys)
+  return callback(new Error("Invalid fields: #{invalidKeys.join(', ')}")) if invalidKeys.length > 0
+  ensureHasOnesExist model, data, propagate callback, ->
+    out = {}
+    async.forEach _.pairs(dbModel[model].fields), ([name, info], callback) ->
+      return callback() if !includeDefaults && name not of data
+      out[name] = formatField(info, data[name])
+      validation = info.validate || defaultValidator
+      validation api, out[name], (isOk) ->
+        return callback() if isOk
+        er = new Error("Validation failed")
+        er.errors = { name: path: name }
+        callback(er)
+    , (err) ->
+      callback(err, out)
+
+
+
 
 exports.create = ->
 
@@ -70,33 +101,15 @@ exports.create = ->
       f.apply(this, arguments)
 
   ensureHasOnesExist = (model, data, callback) ->
-    hasOnes = _.pairs(dbModel[model].fields).filter(([key, {type}]) -> type == 'hasOne').map ([key]) -> key
-    keys = _.object _.pairs(_.pick(data, hasOnes)).filter(([key, value]) -> value?)
-    async.forEach _.pairs(keys), ([key, value], callback) ->
-      model = dbModel[model].fields[key].model
-      filterOne model, { id: value }, (err, apa) ->
+    expected = expectedHasOnes(dbModel, model, data)
+    async.forEach expected, ({model,id,key}, callback) ->
+      filterOne model, { id }, (err) ->
         return callback(new Error("Invalid hasOne-key for '#{key}'")) if err?
         callback()
     , callback
 
   preprocessInput = (model, data, includeDefaults, callback) ->
-    inputKeys = Object.keys(data) # Detta hanterar inte nestade properties
-    validKeys = Object.keys(dbModel[model].fields).concat(Object.keys(dbModel[model].owners))
-    invalidKeys = _.difference(inputKeys, validKeys)
-    return callback(new Error("Invalid fields: #{invalidKeys.join(', ')}")) if invalidKeys.length > 0
-    ensureHasOnesExist model, data, propagate callback, ->
-      out = {}
-      async.forEach _.pairs(dbModel[model].fields), ([name, info], callback) ->
-        return callback() if !includeDefaults && name not of data
-        out[name] = formatField(info, data[name])
-        validation = info.validate || defaultValidator
-        validation api, out[name], (isOk) ->
-          return callback() if isOk
-          er = new Error("Validation failed")
-          er.errors = { name: path: name }
-          callback(er)
-      , (err) ->
-        callback(err, out)
+    preprocessInputCore(dbModel, model, data, includeDefaults, ensureHasOnesExist, api, callback)
 
   deleteObjFromManyToManyRelations = (model, obj) ->
     dbMetaModel[model].manyToMany.forEach ({ ref, inverseName }) ->
@@ -148,8 +161,6 @@ exports.create = ->
       if !Array.isArray(input[name])
         input[name] = []
 
-  delayCallback = (f) ->
-    (args...) -> setImmediate => f(args...)
 
 
 
