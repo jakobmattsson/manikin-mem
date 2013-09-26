@@ -16,7 +16,7 @@ exports.create = ->
     else
       dbObj.collections
 
-  absApi = absManikin.create({
+  absInstance = absManikin.create({
 
     apiClose: (callback) ->
       callback()
@@ -30,8 +30,6 @@ exports.create = ->
     createId: do ->
       counter = 0
       -> "uid#{++counter}"
-
-    getApi: -> api
 
     addManyToMany: (entry, property, value, callback) ->
       entry[property].push(value)
@@ -60,12 +58,12 @@ exports.create = ->
 
     listSorted: (model, filter, callback) ->
       result = filterList(getStore(model), filter)
-      defaultSort = getModel()[model].defaultSort
+      defaultSort = absInstance.getDbModel()[model].defaultSort
       result = _(result).sortBy(defaultSort) if defaultSort
       callback(null, result)
 
     initDb: (callback) ->
-      Object.keys(getModel()).forEach (key) ->
+      Object.keys(absInstance.getDbModel()).forEach (key) ->
         getStore()[key] = []
       callback()
 
@@ -93,6 +91,5 @@ exports.create = ->
       return callback(new Error("No such id")) if result.length == 0
       callback(null, result[0])
   })
-  getModel = absApi.getDbModel
-  getMetaModel = absApi.getMetaModel
-  api = _.omit(absApi, 'getDbModel', 'getMetaModel')
+
+  absInstance.api

@@ -72,7 +72,6 @@ exports.create = (abstracts) ->
     apiClose
     initDb
     appendToCollection
-    getApi
     deleteFromRelations
     setFieldsToNull
     atomicDelete
@@ -124,7 +123,7 @@ exports.create = (abstracts) ->
     , callback
 
   preprocessInput = (model, data, includeDefaults, callback) ->
-    preprocessInputCore(model, data, includeDefaults, ensureHasOnesExist, getApi(), callback)
+    preprocessInputCore(model, data, includeDefaults, ensureHasOnesExist, api, callback)
 
   preprocessInputCore = (model, data, includeDefaults, ensureHasOnesExist, api, callback) ->
     dbModel = getModel()
@@ -167,8 +166,8 @@ exports.create = (abstracts) ->
             delAll(model, _.object([[field, obj.id]]), callback)
           , callback
 
-  # när denna hämtar sin lista så behöver den ju egentligen inte vara sorterad.. lite overkill
   delAll = (model, filter, callback) ->
+    # listan som hämtas här behöver inte vara sorterad. overkill.
     listSorted model, filter, propagate callback, (result) ->
       async.forEach result, (r, callback) ->
         deleteObj(model, r, callback)
@@ -204,8 +203,6 @@ exports.create = (abstracts) ->
         callback()
 
     connectionData: -> connectionDataObj
-    getDbModel: -> dbModel123
-    getMetaModel: -> dbMetaModel
 
     post: mustHaveModel delayCallback (model, indata, callback) ->
       preprocessInput model, indata, true, propagate callback, (processedInput) ->
@@ -259,6 +256,7 @@ exports.create = (abstracts) ->
           getModelDataById relationInfo.ref, id2, propagate callback, (model2) ->
             lockInsertion model, id1, relation, id2, relationInfo.ref, relationInfo.inverseName, callback, (done) ->
 
+              # ManyToMany is assumed to be an array here. NOT OK. (or is it?)
               has1 = id2 in model1[relation]
               has2 = id1 in model2[relationInfo.inverseName]
 
@@ -270,3 +268,10 @@ exports.create = (abstracts) ->
                     done()
               else
                 done(new Error("How the fuck did this happen? Totally invalid state!"))
+
+
+  {
+    api: api
+    getDbModel: -> dbModel123
+    getMetaModel: -> dbMetaModel
+  }
