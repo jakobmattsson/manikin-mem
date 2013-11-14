@@ -4,7 +4,14 @@ absManikin = require './abstract-manikin'
 filterList = (data, filter = {}) ->
   keys = Object.keys(filter)
   data.filter (x) ->
-    keys.every (k) -> x[k] == filter[k]
+    keys.every (k) ->
+      if Array.isArray(filter[k])
+        if Array.isArray(x[k])
+          x[k].some (v) -> filter[k].indexOf(v) != -1
+        else
+          filter[k].indexOf(x[k]) != -1
+      else
+        x[k] == filter[k]
 
 exports.create = ->
 
