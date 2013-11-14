@@ -1,10 +1,10 @@
 {
   "name": "manikin-mem",
   "description": "Data model abstractions in-memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "./lib/manikin-mem.js",
   "author": "Jakob Mattsson <jakob.mattsson@gmail.com> (jakobmattsson.se)",
-  "license" : "MIT",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git://github.com/jakobmattsson/manikin-mem.git"
