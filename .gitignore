@@ -5,3 +5,4 @@ lib
 !.gitignore
 !.npmignore
 
+node_modules
